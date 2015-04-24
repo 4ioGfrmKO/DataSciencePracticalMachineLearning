@@ -1,0 +1,136 @@
+---
+title: "Predicting the quality of fitness excercise execution with machine learning"
+author: "Sebastian Apel"
+date: "Monday, April 20, 2015"
+output: html_document
+---
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(warning=FALSE)
+```
+
+## Summary
+
+In this report, we use data collected from 4 accelerometers to predict if the excersise was executed correctly. The accelerometers were attached to body parts (forearm, arm, belt) and the dumbell used. The goal of your project is to predict the manner in which the exercise was done. We will see a prediction model based on a random forest with ~75% accuracy.
+
+## Background
+
+This is the "classe" variable in the training set. You may use any of the other variables to predict with. You should create a report describing how you built your model, how you used cross validation, what you think the expected out of sample error is, and why you made the choices you did. You will also use your prediction model to predict 20 different test cases. 
+
+In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. 
+
+## Input data
+
+We use the training data for this project are available here: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:  https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The data set was created by the researchers on this website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).  Please cite accordingly when using the dataset.
+
+```{r}
+setwd("Z:/Machine-Learning/DataScience/8-MachineLearn/Project")
+
+dataOrig <- read.csv("pml-training.csv")
+testOrig <- read.csv("pml-testing.csv")
+
+# what data do we have?
+# colnames(dataOrig)
+
+# Whats inside?
+# summary(dataOrig)
+```
+
+I've commented out the exploratory statements for the sake of a short report. What you can see is that a lot of columns contain NA, especially in the test set. Since these columns most likely do not help during prediction, we will drop them.
+
+```{r}
+# drop all columns that only have "NA" in the test set
+countNA <- apply(testOrig, 2, function(x) length(which(!is.na(x))))
+t <- as.data.frame(countNA)
+t$colNames <- rownames(t)
+
+# select all columns that do not have any NAs in each column
+t2 <- t[t$countNA == 20,]
+KeepCols <- t2$colNames
+
+# drop Columns that will not be helpful because they contain only NA
+test2 <- testOrig[,KeepCols]
+data2 <- dataOrig[,union(intersect(KeepCols, colnames(dataOrig)), "classe")]
+```
+
+
+Next, we find that some rows contain a marker "new_window=yes". Apparently, those are summary lines - we will use only those for prediction.
+
+```{r}
+# let's start by looking only at the "new_window=yes" rows -> seems to be the summary
+aggdat <- data2[which(data2$new_window=="yes"), ]
+#aggdat <- data2
+
+```
+
+Next, we split the data into training and crossvalidation set. We also make sure we get enough data from each participant and each outcome in the two sets - we do this because we do not want the model to have preferences for a particular person or movement type by accident.
+
+```{r}
+# Save classe
+aggdat$classeOrig <- aggdat$classe
+# replace by concatenation
+aggdat$classe <- paste(aggdat$user_name, aggdat$classe)
+
+library(caret)
+set.seed(3456)
+trainIndex <- createDataPartition(aggdat$classe, p = .8, list = FALSE, times = 1)
+
+aggdat$classe <- aggdat$classeOrig 
+
+train <- aggdat[trainIndex,  ]
+crossvalidation <- aggdat[-trainIndex,  ]
+```
+
+The Training set contains data that we do not want as part of our prediction model - we therefore drop them.
+
+```{r}
+# drop some columns to prepare for prediction
+dropCols <- c("user_name", "raw_timestamp_part_1", "raw_timestamp_part_2", "cvtd_timestamp", "new_window", "num_window",  "X", "classeOrig")
+
+trainCleanOrig <- train[,!(names(train) %in%  dropCols)]
+trainClean <- trainCleanOrig
+``` 
+
+
+Now we train a Random Forest model.
+
+```{r}
+
+rfModel <- train(classe ~. , data=trainClean, method="rf",
+                trControl=trainControl(method="cv",number=5)#, verboseIter=T),
+                #trControl=trainControl( verboseIter=T),
+                #do.trace=T
+                )
+
+
+print(rfModel$finalModel)
+```
+
+And then we check how well the model performs on our crossvalidation set.
+
+```{r}
+pred<- predict(rfModel, crossvalidation)
+confusionMatrix(pred, crossvalidation$classe)
+```
+
+Finally, we predict our test set.
+
+```{r}
+predTest <- predict(rfModel, test2)
+predTest
+```
+
+### Appendix
+
+Let's have a quick look to check if test and training set are appropriately distributed.
+
+```{r}
+# look at the plots to check if that looks good
+print(ggplot(train, aes(x=classe)) + facet_grid(user_name ~.) + geom_histogram())
+print(ggplot(crossvalidation, aes(x=classe)) +facet_grid(user_name ~.) +  geom_histogram())
+
+```
